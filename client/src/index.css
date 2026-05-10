@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #B2C8E0;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+#root {
+  height: 100dvh;
+  display: flex;
+}
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+.scrollbar-thin::-webkit-scrollbar { width: 4px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 2px; }
+
+@layer components {
+  .btn-kakao {
+    @apply bg-kakao-yellow text-kakao-brown font-semibold py-3 px-6 rounded-xl w-full transition-all active:scale-95 hover:brightness-95;
+  }
+  .input-field {
+    @apply w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-kakao-yellow bg-white;
+  }
+  .chat-bubble-mine {
+    @apply bg-kakao-yellow text-kakao-brown rounded-2xl rounded-tr-sm px-3 py-2 max-w-xs break-words;
+  }
+  .chat-bubble-other {
+    @apply bg-white text-gray-800 rounded-2xl rounded-tl-sm px-3 py-2 max-w-xs break-words shadow-sm;
+  }
+}
