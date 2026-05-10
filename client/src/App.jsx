@@ -1,25 +1,38 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import useAuthStore from './stores/authStore.js';
-import { useSocket } from './hooks/useSocket.js';
 import LoginPage from './pages/LoginPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
 import ChatPage from './pages/ChatPage.jsx';
 
 function ProtectedRoute({ children }) {
-  const { user } = useAuthStore();
-  if (!user) return <Navigate to="/login" replace />;
+  const { currentUser } = useAuthStore();
+  if (!currentUser) return <Navigate to="/login" replace />;
   return children;
 }
 
-function AppContent() {
-  useSocket();
+export default function App() {
+  const { currentUser, restoreSession } = useAuthStore();
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    restoreSession().then(() => setReady(true));
+
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
   }, []);
+
+  if (!ready) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-kakao-yellow">
+        <div className="text-center">
+          <div className="text-5xl mb-3">💬</div>
+          <p className="text-kakao-brown font-semibold">kkimyd</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Routes>
@@ -32,8 +45,4 @@ function AppContent() {
       } />
     </Routes>
   );
-}
-
-export default function App() {
-  return <AppContent />;
 }

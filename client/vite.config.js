@@ -11,7 +11,7 @@ export default defineConfig({
       manifest: {
         name: 'kkimyd 메신저',
         short_name: 'kkimyd',
-        description: '크로스 디바이스 메신저 앱',
+        description: 'P2P 크로스 디바이스 메신저 - 중앙 서버 없이 기기 간 직접 동기화',
         theme_color: '#FEE500',
         background_color: '#ffffff',
         display: 'standalone',
@@ -23,20 +23,13 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/.*\/api\//,
-            handler: 'NetworkFirst',
-            options: { cacheName: 'api-cache', networkTimeoutSeconds: 10 },
-          },
-        ],
       },
     }),
   ],
-  server: {
-    proxy: {
-      '/api': 'http://localhost:4000',
-      '/uploads': 'http://localhost:4000',
-    },
+  define: {
+    global: 'globalThis',
+  },
+  optimizeDeps: {
+    include: ['gun', 'gun/sea', 'gun/lib/radix', 'gun/lib/radisk', 'gun/lib/store', 'gun/lib/rindexed'],
   },
 });

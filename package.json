@@ -1,12 +1,11 @@
 {
   "name": "kkimyd",
-  "version": "1.0.0",
-  "description": "크로스 디바이스 메신저 웹앱 - 카카오톡 스타일",
+  "version": "2.0.0",
+  "description": "P2P 크로스 디바이스 메신저 - Gun.js 로컬 퍼스트",
   "scripts": {
-    "install:all": "cd server && npm install && cd ../client && npm install",
-    "dev:server": "cd server && npm run dev",
-    "dev:client": "cd client && npm run dev",
-    "setup": "cd server && npx prisma generate && npx prisma db push",
-    "start": "cd server && npm start"
+    "install:all": "cd relay && npm install && cd ../client && npm install",
+    "relay": "cd relay && node server.js",
+    "dev": "cd client && npm run dev",
+    "build": "cd client && npm run build"
   }
 }
