@@ -1,13 +1,16 @@
 import io
+import os
 import sys
 import speech_recognition as sr
+from dotenv import load_dotenv
 from faster_whisper import WhisperModel
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSizeGrip
 from PyQt5.QtCore import Qt, QPoint, QRect, QThread, pyqtSignal
 import deepl
 
-# DeepL API 키
-DEEPL_API_KEY = "여기에_API_키를_입력하세요"
+# .env 파일에서 DEEPL_API_KEY를 읽어온다 (키를 코드에 직접 적지 않기 위함)
+load_dotenv()
+DEEPL_API_KEY = os.environ.get("DEEPL_API_KEY", "")
 
 RESIZE_MARGIN = 8
 MIN_WIDTH = 300
@@ -108,11 +111,15 @@ class ListenerThread(QThread):
 class FreeTalkApp(QWidget):
     def __init__(self):
         super().__init__()
-        try:
-            self.translator = deepl.Translator(DEEPL_API_KEY)
-        except Exception as e:
-            print(f"API 키 오류: {e}")
+        if not DEEPL_API_KEY:
+            print("DEEPL_API_KEY가 설정되지 않았습니다. .env 파일에 키를 추가하세요.")
             self.translator = None
+        else:
+            try:
+                self.translator = deepl.Translator(DEEPL_API_KEY)
+            except Exception as e:
+                print(f"API 키 오류: {e}")
+                self.translator = None
 
         self._resizing = False
         self._resize_dir = None
