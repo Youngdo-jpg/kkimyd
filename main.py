@@ -16,7 +16,7 @@ load_dotenv()
 DEEPL_API_KEY = os.environ.get("DEEPL_API_KEY", "")
 
 RESIZE_MARGIN = 8
-MIN_WIDTH = 480
+MIN_WIDTH = 560
 MIN_HEIGHT = 140
 
 CURSOR_BY_DIRECTION = {
@@ -32,16 +32,25 @@ CURSOR_BY_DIRECTION = {
 
 # 마이크 음성의 언어를 자동 감지하는 Whisper 모델 설정
 # tiny/base/small/medium 순으로 무거워지고 정확해진다.
-# GPU가 없는 환경 기준으로, tiny는 정확도가 너무 낮아 small을 기본값으로 사용한다.
-# CPU가 느려서 여전히 답답하면 "base"로 낮추고, 반대로 정확도를 더 올리고 싶으면 "medium"을 시도해볼 것.
-WHISPER_MODEL_SIZE = "small"
+# 이제 아래 SOURCE_LANGUAGE_CANDIDATES로 언어 후보를 한/영으로 고정해두기 때문에,
+# 예전(전체 99개 언어 자동판별)만큼 작은 모델이 불리하지 않다. 속도를 우선해 base를 기본값으로 사용.
+WHISPER_MODEL_SIZE = "base"
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"
 
-# 음성 인식이 고를 수 있는 원문 언어 후보. Whisper는 짧은 발화일수록 전체 99개 언어 중에서
-# 음향적으로 비슷한 엉뚱한 언어(예: 한국어 -> 일본어)로 오판하기 쉽다.
+# 음성 인식이 고를 수 있는 원문 언어 후보 (자동 감지 모드에서 사용). Whisper는 짧은 발화일수록
+# 전체 99개 언어 중에서 음향적으로 비슷한 엉뚱한 언어(예: 한국어 -> 일본어)로 오판하기 쉽다.
 # 이 앱은 한국어<->영어 자동 통역이 목적이므로, 후보를 두 언어로 좁혀 오판을 막는다.
 SOURCE_LANGUAGE_CANDIDATES = ["ko", "en"]
+
+# 입력 언어 선택 메뉴: (표시 이름, 강제 언어 코드). 코드가 None이면 매 발화마다 위 후보 중에서
+# 자동 판별한다(정확하지만 판별 단계가 추가로 걸린다). 코드를 지정하면 판별 단계를 건너뛰고
+# 바로 그 언어로 전사하므로 훨씬 빠르다 — 한 사람이 한 언어로만 계속 말할 때 추천.
+SOURCE_LANG_OPTIONS = [
+    ("자동 감지 (정확, 느림)", None),
+    ("한국어 고정 (빠름)", "ko"),
+    ("English only (빠름)", "en"),
+]
 
 # 번역 대상 언어 선택 메뉴에 표시할 항목: (표시 이름, DeepL target_lang 코드). 코드가 None이면 자동 모드.
 LANGUAGE_OPTIONS = [
@@ -67,12 +76,13 @@ class ListenerThread(QThread):
     updated = pyqtSignal(str, str, str)  # 인식된 원문, 번역문, 감지된 언어 코드
     status = pyqtSignal(str)
 
-    def __init__(self, translator, device_index=None, target_lang_override=None):
+    def __init__(self, translator, device_index=None, target_lang_override=None, source_lang_override=None):
         super().__init__()
         self.translator = translator
         self.device_index = device_index
-        # 메인 스레드에서 언어 선택 메뉴를 바꾸면 이 값을 바로 갱신해 재시작 없이 반영한다.
+        # 메인 스레드에서 언어 선택 메뉴를 바꾸면 이 값들을 바로 갱신해 재시작 없이 반영한다.
         self.target_lang_override = target_lang_override
+        self.source_lang_override = source_lang_override
         self.recognizer = sr.Recognizer()
         # 너무 짧으면(0.6초) 문장이 중간에 잘려 인식률이 떨어지고, 너무 길면 반응이 굼떠 보인다.
         # 기본값(0.8초) 근처가 무난하다.
@@ -118,15 +128,21 @@ class ListenerThread(QThread):
                 try:
                     audio_array = decode_audio(io.BytesIO(audio.get_wav_data()))
 
-                    # 1단계: 전체 99개 언어가 아니라 SOURCE_LANGUAGE_CANDIDATES 안에서만
-                    # 확률이 가장 높은 언어를 고른다. (짧은 발화의 언어 오판 방지)
-                    _, _, all_probs = model.detect_language(audio=audio_array, vad_filter=True)
-                    probs_by_lang = dict(all_probs)
-                    detected_lang = max(
-                        SOURCE_LANGUAGE_CANDIDATES, key=lambda lang: probs_by_lang.get(lang, 0.0)
-                    )
+                    if self.source_lang_override:
+                        # 입력 언어가 고정되어 있으면 판별 단계를 건너뛰고 바로 전사한다.
+                        # (Whisper 인코더를 한 번만 돌리므로 자동 감지보다 눈에 띄게 빠르다.)
+                        detected_lang = self.source_lang_override
+                    else:
+                        # SOURCE_LANGUAGE_CANDIDATES 안에서만 확률이 가장 높은 언어를 고른다.
+                        # (짧은 발화가 전체 99개 언어 중 엉뚱한 언어로 오판되는 것을 방지)
+                        _, _, all_probs = model.detect_language(audio=audio_array, vad_filter=True)
+                        probs_by_lang = dict(all_probs)
+                        detected_lang = max(
+                            SOURCE_LANGUAGE_CANDIDATES,
+                            key=lambda lang: probs_by_lang.get(lang, 0.0),
+                        )
 
-                    # 2단계: 감지된 언어로 고정해서 전사한다 (language=None으로 다시 맡기지 않음).
+                    # 감지(또는 고정)된 언어로 전사한다 (language=None으로 다시 맡기지 않음).
                     segments, info = model.transcribe(
                         audio_array, language=detected_lang, beam_size=1, vad_filter=True
                     )
@@ -186,8 +202,12 @@ class FreeTalkApp(QWidget):
 
         device_index = self.mic_combo.currentData()
         target_lang = self.lang_combo.currentData()
+        source_lang = self.src_lang_combo.currentData()
         self.listener = ListenerThread(
-            self.translator, device_index=device_index, target_lang_override=target_lang
+            self.translator,
+            device_index=device_index,
+            target_lang_override=target_lang,
+            source_lang_override=source_lang,
         )
         self.listener.updated.connect(self.on_updated)
         self.listener.status.connect(self.on_status)
@@ -196,7 +216,7 @@ class FreeTalkApp(QWidget):
     def initUI(self):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setGeometry(100, 100, 760, 190)
+        self.setGeometry(100, 100, 820, 190)
         self.setMinimumSize(MIN_WIDTH, MIN_HEIGHT)
         self.setMouseTracking(True)
 
@@ -233,6 +253,12 @@ class FreeTalkApp(QWidget):
             print(f"마이크 목록 조회 실패: {e}")
         self.mic_combo.currentIndexChanged.connect(self.on_mic_changed)
 
+        self.src_lang_combo = QComboBox()
+        self.src_lang_combo.setStyleSheet(combo_style)
+        for label, code in SOURCE_LANG_OPTIONS:
+            self.src_lang_combo.addItem(label, code)
+        self.src_lang_combo.currentIndexChanged.connect(self.on_src_lang_changed)
+
         self.lang_combo = QComboBox()
         self.lang_combo.setStyleSheet(combo_style)
         for label, code in LANGUAGE_OPTIONS:
@@ -241,6 +267,7 @@ class FreeTalkApp(QWidget):
 
         controls_layout = QHBoxLayout()
         controls_layout.addWidget(self.mic_combo, 1)
+        controls_layout.addWidget(self.src_lang_combo, 1)
         controls_layout.addWidget(self.lang_combo, 1)
         bg_layout.addLayout(controls_layout)
 
@@ -374,6 +401,11 @@ class FreeTalkApp(QWidget):
         # 번역 대상 언어는 실행 중인 스레드의 속성만 바꿔주면 다음 문장부터 바로 반영된다.
         if self.listener is not None:
             self.listener.target_lang_override = self.lang_combo.currentData()
+
+    def on_src_lang_changed(self, _index):
+        # 입력 언어 고정도 스레드 재시작 없이 속성만 바꾸면 다음 문장부터 바로 반영된다.
+        if self.listener is not None:
+            self.listener.source_lang_override = self.src_lang_combo.currentData()
 
     def closeEvent(self, event):
         self.listener.stop()
