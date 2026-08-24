@@ -4,6 +4,7 @@ import sys
 import speech_recognition as sr
 from dotenv import load_dotenv
 from faster_whisper import WhisperModel
+from faster_whisper.audio import decode_audio
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSizeGrip, QComboBox, QFrame,
 )
@@ -36,6 +37,11 @@ CURSOR_BY_DIRECTION = {
 WHISPER_MODEL_SIZE = "small"
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"
+
+# 음성 인식이 고를 수 있는 원문 언어 후보. Whisper는 짧은 발화일수록 전체 99개 언어 중에서
+# 음향적으로 비슷한 엉뚱한 언어(예: 한국어 -> 일본어)로 오판하기 쉽다.
+# 이 앱은 한국어<->영어 자동 통역이 목적이므로, 후보를 두 언어로 좁혀 오판을 막는다.
+SOURCE_LANGUAGE_CANDIDATES = ["ko", "en"]
 
 # 번역 대상 언어 선택 메뉴에 표시할 항목: (표시 이름, DeepL target_lang 코드). 코드가 None이면 자동 모드.
 LANGUAGE_OPTIONS = [
@@ -109,15 +115,22 @@ class ListenerThread(QThread):
                 except Exception:
                     continue
 
-                wav_stream = io.BytesIO(audio.get_wav_data())
                 try:
-                    # language=None 이면 Whisper가 음성의 언어를 자동으로 감지한다.
-                    # beam_size=1과 vad_filter로 정확도를 조금 양보하고 응답 속도를 높인다.
+                    audio_array = decode_audio(io.BytesIO(audio.get_wav_data()))
+
+                    # 1단계: 전체 99개 언어가 아니라 SOURCE_LANGUAGE_CANDIDATES 안에서만
+                    # 확률이 가장 높은 언어를 고른다. (짧은 발화의 언어 오판 방지)
+                    _, _, all_probs = model.detect_language(audio=audio_array, vad_filter=True)
+                    probs_by_lang = dict(all_probs)
+                    detected_lang = max(
+                        SOURCE_LANGUAGE_CANDIDATES, key=lambda lang: probs_by_lang.get(lang, 0.0)
+                    )
+
+                    # 2단계: 감지된 언어로 고정해서 전사한다 (language=None으로 다시 맡기지 않음).
                     segments, info = model.transcribe(
-                        wav_stream, language=None, beam_size=1, vad_filter=True
+                        audio_array, language=detected_lang, beam_size=1, vad_filter=True
                     )
                     text = "".join(segment.text for segment in segments).strip()
-                    detected_lang = info.language
                 except Exception as e:
                     self.status.emit(f"음성 인식 오류: {e}")
                     continue
