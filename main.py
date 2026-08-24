@@ -52,6 +52,17 @@ SOURCE_LANG_OPTIONS = [
     ("English only (빠름)", "en"),
 ]
 
+# 말하는 도중 이 시간(초)만큼 조용해지면 문장이 끝난 것으로 간주하고 인식을 시작한다.
+# 너무 짧으면 숨 고르기·생각하는 순간에도 문장이 잘려서 조각난 문장만 인식된다.
+# 너무 길면 말이 끝나고도 한참 기다려야 번역이 나온다. 1.0~1.5초 사이에서 취향껏 조절할 것.
+PAUSE_THRESHOLD_SECONDS = 1.2
+
+# 한 번에 녹음할 수 있는 최대 길이(초). 이보다 길게 쉬지 않고 말하면 여기서 강제로 끊긴다.
+PHRASE_TIME_LIMIT_SECONDS = 15
+
+# Whisper 빔서치 폭. 1(그리디)이 가장 빠르고, 5로 갈수록 느려지는 대신 더 정확해진다.
+WHISPER_BEAM_SIZE = 2
+
 # 번역 대상 언어 선택 메뉴에 표시할 항목: (표시 이름, DeepL target_lang 코드). 코드가 None이면 자동 모드.
 LANGUAGE_OPTIONS = [
     ("자동 (한국어 ⇄ 영어)", None),
@@ -84,9 +95,7 @@ class ListenerThread(QThread):
         self.target_lang_override = target_lang_override
         self.source_lang_override = source_lang_override
         self.recognizer = sr.Recognizer()
-        # 너무 짧으면(0.6초) 문장이 중간에 잘려 인식률이 떨어지고, 너무 길면 반응이 굼떠 보인다.
-        # 기본값(0.8초) 근처가 무난하다.
-        self.recognizer.pause_threshold = 0.8
+        self.recognizer.pause_threshold = PAUSE_THRESHOLD_SECONDS
         self._running = True
         self._model = None
 
@@ -121,7 +130,9 @@ class ListenerThread(QThread):
                 try:
                     # timeout을 짧게 둬서 무음 상태에서도 주기적으로 _running 플래그를 확인하게 한다.
                     # (그래야 마이크 전환 시 이전 스레드가 즉시 종료된다.)
-                    audio = self.recognizer.listen(source, timeout=1, phrase_time_limit=8)
+                    audio = self.recognizer.listen(
+                        source, timeout=1, phrase_time_limit=PHRASE_TIME_LIMIT_SECONDS
+                    )
                 except Exception:
                     continue
 
@@ -144,7 +155,10 @@ class ListenerThread(QThread):
 
                     # 감지(또는 고정)된 언어로 전사한다 (language=None으로 다시 맡기지 않음).
                     segments, info = model.transcribe(
-                        audio_array, language=detected_lang, beam_size=1, vad_filter=True
+                        audio_array,
+                        language=detected_lang,
+                        beam_size=WHISPER_BEAM_SIZE,
+                        vad_filter=True,
                     )
                     text = "".join(segment.text for segment in segments).strip()
                 except Exception as e:
