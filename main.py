@@ -1,6 +1,9 @@
+import io
 import sys
+import speech_recognition as sr
+from faster_whisper import WhisperModel
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSizeGrip
-from PyQt5.QtCore import Qt, QPoint, QRect
+from PyQt5.QtCore import Qt, QPoint, QRect, QThread, pyqtSignal
 import deepl
 
 # DeepL API 키
@@ -21,6 +24,87 @@ CURSOR_BY_DIRECTION = {
     'bottom_left': Qt.SizeBDiagCursor,
 }
 
+# 마이크 음성의 언어를 자동 감지하는 Whisper 모델 설정
+WHISPER_MODEL_SIZE = "base"
+WHISPER_DEVICE = "cpu"
+WHISPER_COMPUTE_TYPE = "int8"
+
+
+def target_lang_for(detected_lang):
+    # 감지된 언어가 한국어면 영어로, 그 외에는 한국어로 번역
+    return "EN-US" if (detected_lang or "").lower() == "ko" else "KO"
+
+
+class ListenerThread(QThread):
+    updated = pyqtSignal(str, str, str)  # 인식된 원문, 번역문, 감지된 언어 코드
+    status = pyqtSignal(str)
+
+    def __init__(self, translator):
+        super().__init__()
+        self.translator = translator
+        self.recognizer = sr.Recognizer()
+        self._running = True
+        self._model = None
+
+    def _load_model(self):
+        if self._model is None:
+            self.status.emit("음성 인식 모델을 불러오는 중입니다...")
+            self._model = WhisperModel(
+                WHISPER_MODEL_SIZE, device=WHISPER_DEVICE, compute_type=WHISPER_COMPUTE_TYPE
+            )
+        return self._model
+
+    def run(self):
+        try:
+            model = self._load_model()
+        except Exception as e:
+            self.status.emit(f"음성 인식 모델 로드 실패: {e}")
+            return
+
+        try:
+            mic = sr.Microphone()
+        except Exception as e:
+            self.status.emit(f"마이크를 찾을 수 없습니다: {e}")
+            return
+
+        with mic as source:
+            self.recognizer.adjust_for_ambient_noise(source)
+            self.status.emit("듣는 중입니다...")
+            while self._running:
+                try:
+                    audio = self.recognizer.listen(source, phrase_time_limit=8)
+                except Exception:
+                    continue
+
+                wav_stream = io.BytesIO(audio.get_wav_data())
+                try:
+                    # language=None 이면 Whisper가 음성의 언어를 자동으로 감지한다.
+                    segments, info = model.transcribe(wav_stream, language=None)
+                    text = "".join(segment.text for segment in segments).strip()
+                    detected_lang = info.language
+                except Exception as e:
+                    self.status.emit(f"음성 인식 오류: {e}")
+                    continue
+
+                if not text:
+                    continue
+
+                translated_text = text
+                if self.translator:
+                    try:
+                        target_lang = target_lang_for(detected_lang)
+                        translated_text = self.translator.translate_text(
+                            text, target_lang=target_lang
+                        ).text
+                    except Exception as e:
+                        translated_text = f"[번역 오류: {e}]"
+
+                self.updated.emit(text, translated_text, detected_lang)
+
+    def stop(self):
+        self._running = False
+
+
 class FreeTalkApp(QWidget):
     def __init__(self):
         super().__init__()
@@ -37,6 +121,11 @@ class FreeTalkApp(QWidget):
 
         self.initUI()
         self.oldPos = self.pos()
+
+        self.listener = ListenerThread(self.translator)
+        self.listener.updated.connect(self.on_updated)
+        self.listener.status.connect(self.on_status)
+        self.listener.start()
 
     def initUI(self):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
@@ -157,6 +246,18 @@ class FreeTalkApp(QWidget):
         if self.translator:
             result = self.translator.translate_text(text, target_lang=target_lang)
             self.tgt_label.setText(result.text)
+
+    def on_updated(self, source_text, translated_text, detected_lang):
+        self.src_label.setText(f"[{detected_lang}] {source_text}")
+        self.tgt_label.setText(translated_text)
+
+    def on_status(self, message):
+        self.src_label.setText(message)
+
+    def closeEvent(self, event):
+        self.listener.stop()
+        self.listener.wait(2000)
+        super().closeEvent(event)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
