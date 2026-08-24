@@ -30,8 +30,10 @@ CURSOR_BY_DIRECTION = {
 }
 
 # 마이크 음성의 언어를 자동 감지하는 Whisper 모델 설정
-# tiny/base/small 순으로 무거워지고 정확해진다. 응답 속도를 우선해 tiny를 기본값으로 사용.
-WHISPER_MODEL_SIZE = "tiny"
+# tiny/base/small/medium 순으로 무거워지고 정확해진다.
+# GPU가 없는 환경 기준으로, tiny는 정확도가 너무 낮아 small을 기본값으로 사용한다.
+# CPU가 느려서 여전히 답답하면 "base"로 낮추고, 반대로 정확도를 더 올리고 싶으면 "medium"을 시도해볼 것.
+WHISPER_MODEL_SIZE = "small"
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"
 
@@ -66,7 +68,9 @@ class ListenerThread(QThread):
         # 메인 스레드에서 언어 선택 메뉴를 바꾸면 이 값을 바로 갱신해 재시작 없이 반영한다.
         self.target_lang_override = target_lang_override
         self.recognizer = sr.Recognizer()
-        self.recognizer.pause_threshold = 0.6  # 말이 끊긴 뒤 문장으로 판단하는 시간을 단축 (기본 0.8초)
+        # 너무 짧으면(0.6초) 문장이 중간에 잘려 인식률이 떨어지고, 너무 길면 반응이 굼떠 보인다.
+        # 기본값(0.8초) 근처가 무난하다.
+        self.recognizer.pause_threshold = 0.8
         self._running = True
         self._model = None
 
@@ -74,7 +78,10 @@ class ListenerThread(QThread):
         if self._model is None:
             self.status.emit("음성 인식 모델을 불러오는 중입니다...")
             self._model = WhisperModel(
-                WHISPER_MODEL_SIZE, device=WHISPER_DEVICE, compute_type=WHISPER_COMPUTE_TYPE
+                WHISPER_MODEL_SIZE,
+                device=WHISPER_DEVICE,
+                compute_type=WHISPER_COMPUTE_TYPE,
+                cpu_threads=os.cpu_count() or 4,
             )
         return self._model
 
